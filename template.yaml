@@ -1,0 +1,178 @@
+# This is the SAM template that represents the architecture of your serverless application
+# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-template-basics.html
+
+# The AWSTemplateFormatVersion identifies the capabilities of the template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/format-version-structure.html
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  upskill
+
+# Transform section specifies one or more macros that AWS CloudFormation uses to process your template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-section-structure.html
+Transform:
+- AWS::Serverless-2016-10-31
+
+# Resources declares the AWS resources that you want to include in the stack
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resources-section-structure.html
+Resources:
+  # Each Lambda function is defined by properties:
+  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+
+  # This is a Lambda function config associated with the source code: create-category.js
+  createCategoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-category.createCategoryHandler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 101
+      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
+      Policies:
+        # Give Create/Read/Update/Delete Permissions to the AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AggregateStore
+      Environment:
+        Variables:
+          # Make table name accessible as environment variable from function code during execution
+          AGGREGATE_STORE_TABLE: !Ref AggregateStore
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /categories
+            Method: POST
+  # Each Lambda function is defined by properties:
+  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+
+  # This is a Lambda function config associated with the source code: get-by-id.js
+  getCategoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-category-by-id.getByIdHandler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 100
+      Description: A simple example includes a HTTP get method to get one item by id from a DynamoDB table.
+      Policies:
+        # Give Create/Read/Update/Delete Permissions to the AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AggregateStore
+      Environment:
+        Variables:
+          # Make table name accessible as environment variable from function code during execution
+          SAMPLE_TABLE: !Ref AggregateStore
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /{id}
+            Method: GET
+  # Each Lambda function is defined by properties:
+  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+
+  # This is a Lambda function config associated with the source code: create-product.js
+  createProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-product.createProductHandler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 100
+      Description: A simple example includes a HTTP post method to add one item to a DynamoDB table.
+      Policies:
+        # Give Create/Read/Update/Delete Permissions to the AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventStore
+      Environment:
+        Variables:
+          # Make table name accessible as environment variable from function code during execution
+          AGGREGATE_STORE_TABLE: !Ref AggregateStore
+          EVENT_STORE_TABLE: !Ref EventStore
+
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /products
+            Method: POST
+
+  getProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-products.getProductsHandler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 100
+      Description: A simple example includes a HTTP post method to add one item to a DynamoDB table.
+      Policies:
+        # Give Create/Read/Update/Delete Permissions to the AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AggregateStore
+      Environment:
+        Variables:
+          # Make table name accessible as environment variable from function code during execution
+          SAMPLE_TABLE: !Ref AggregateStore
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /products
+            Method: GET
+
+  # Simple syntax to create a DynamoDB table with a single attribute primary key, more in
+  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlesssimpletable
+  ProcessEventStreamFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/process-event-stream.processStreamHandler
+      Runtime: nodejs14.x
+      Policies: AWSLambdaDynamoDBExecutionRole
+      Events:
+        Stream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt EventStore.StreamArn
+            BatchSize: 100
+            StartingPosition: TRIM_HORIZON
+
+  # DynamoDB table to store item: {id: &lt;ID&gt;, name: &lt;NAME&gt;}
+  EventStore:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+  # DynamoDB table to store item: {id: &lt;ID&gt;, name: &lt;NAME&gt;}
+
+  AggregateStore:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+
+Outputs:
+  WebEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
