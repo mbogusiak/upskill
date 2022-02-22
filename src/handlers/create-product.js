@@ -21,7 +21,7 @@ exports.createProductHandler = async (event) => {
    if(categoryExist.Items.length == 0){
        return {
         statusCode: 400,
-        body: JSON.stringify('Category doesn't exist')
+        body: JSON.stringify('Category doesnt exist')
        };
 
    }
@@ -53,7 +53,6 @@ exports.createProductHandler = async (event) => {
 }
 
  async function addProductToAggregateStore(product){
-     console.log(product);
     const metaAggregate = { 'discriminator': 'PRODUCT'};
 
     var params = {
@@ -67,17 +66,16 @@ exports.createProductHandler = async (event) => {
 
  async function addProductToEventStore(product){
      console.log(product);
-    const metaAggregate = {'id':'1', 'eventType': 'ADD_PRODUCT', 'eventTime': Date.now()};
+    const metaAggregate = {'id':product.id, 'eventType': 'ADD_PRODUCT', 'eventTime': Date.now()};
 
     var params = {
-        TableName : 'upskill-app-EventStore-ATLHBW5VQ0K9',
+        TableName : eventStoreTable,
         Item: {... metaAggregate, 'body':product }
     };
 
     return await docClient.put(params).promise();
 }
   function isProductValid(product){
-     console.log(product);
      const metaAggregate = { 'discriminator': 'PRODUCT'};
 
     var params = {

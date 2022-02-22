@@ -10,7 +10,7 @@ Description: >-
 # Transform section specifies one or more macros that AWS CloudFormation uses to process your template
 # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-section-structure.html
 Transform:
-- AWS::Serverless-2016-10-31
+  - AWS::Serverless-2016-10-31
 
 # Resources declares the AWS resources that you want to include in the stack
 # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resources-section-structure.html
@@ -33,10 +33,13 @@ Resources:
         # Give Create/Read/Update/Delete Permissions to the AggregateStore
         - DynamoDBCrudPolicy:
             TableName: !Ref AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventStore
       Environment:
         Variables:
           # Make table name accessible as environment variable from function code during execution
           AGGREGATE_STORE_TABLE: !Ref AggregateStore
+          EVENT_STORE_TABLE: !Ref EventStore
       Events:
         Api:
           Type: Api
@@ -57,19 +60,15 @@ Resources:
       MemorySize: 128
       Timeout: 100
       Description: A simple example includes a HTTP get method to get one item by id from a DynamoDB table.
-      Policies:
-        # Give Create/Read/Update/Delete Permissions to the AggregateStore
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AggregateStore
       Environment:
         Variables:
           # Make table name accessible as environment variable from function code during execution
-          SAMPLE_TABLE: !Ref AggregateStore
+          CATEGORIES_STORE: !Ref CategoriesStore
       Events:
         Api:
           Type: Api
           Properties:
-            Path: /{id}
+            Path: /categories/{id}
             Method: GET
   # Each Lambda function is defined by properties:
   # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -103,6 +102,34 @@ Resources:
           Properties:
             Path: /products
             Method: POST
+  updateProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/update-product.updateProductHandler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 100
+      Description: A simple example includes a HTTP post method to add one item to a DynamoDB table.
+      Policies:
+        # Give Create/Read/Update/Delete Permissions to the AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventStore
+      Environment:
+        Variables:
+          # Make table name accessible as environment variable from function code during execution
+          AGGREGATE_STORE_TABLE: !Ref AggregateStore
+          EVENT_STORE_TABLE: !Ref EventStore
+
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /products
+            Method: PATCH
 
   getProductsFunction:
     Type: AWS::Serverless::Function
@@ -129,6 +156,11 @@ Resources:
             Path: /products
             Method: GET
 
+  SnsTopicEventProcessing:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: 'EventProcessing2'
+
   # Simple syntax to create a DynamoDB table with a single attribute primary key, more in
   # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlesssimpletable
   ProcessEventStreamFunction:
@@ -136,7 +168,14 @@ Resources:
     Properties:
       Handler: src/handlers/process-event-stream.processStreamHandler
       Runtime: nodejs14.x
-      Policies: AWSLambdaDynamoDBExecutionRole
+      Policies:
+        - AWSLambdaDynamoDBExecutionRole
+        - SNSPublishMessagePolicy:
+            TopicName: 'EventProcessing2'
+      Environment:
+        Variables:
+          # Make table name accessible as environment variable from function code during execution
+          SNS_TOPIC: !Ref SnsTopicEventProcessing
       Events:
         Stream:
           Type: DynamoDB
@@ -144,6 +183,69 @@ Resources:
             Stream: !GetAtt EventStore.StreamArn
             BatchSize: 100
             StartingPosition: TRIM_HORIZON
+
+  indexProductInOpenSearch:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/index-product-in-opensearch.indexProductHandler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 29
+      Description: A simple example includes a HTTP post method to add one item to a DynamoDB table.
+      Policies:
+        # Give Create/Read/Update/Delete Permissions to the AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AggregateStore
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventStore
+
+      Events:
+        MySQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt QueueElasticSearch.Arn
+            BatchSize: 1
+
+  saveCategoryInDynamoDB:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/save-category-in-dynamodb.saveCategoryInDynamoDBHandler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 29
+      Description: A simple example includes a HTTP post method to add one item to a DynamoDB table.
+      Environment:
+        Variables:
+          CATEGORY_DB: !Ref CategoriesStore
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CategoriesStore
+      Events:
+        MySQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt QueueDynamoDB.Arn
+            BatchSize: 1
+
+  saveEventInS3Function:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/save-event-in-s3.saveEventInS3Handler
+      Runtime: nodejs14.x
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 29
+      Events:
+        MySQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt QueueS3.Arn
+            BatchSize: 1
 
   # DynamoDB table to store item: {id: &lt;ID&gt;, name: &lt;NAME&gt;}
   EventStore:
@@ -171,6 +273,76 @@ Resources:
       ProvisionedThroughput:
         ReadCapacityUnits: 2
         WriteCapacityUnits: 2
+
+  CategoriesStore:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
+
+  QueueElasticSearch:
+    Type: AWS::SQS::Queue
+
+  QueueS3:
+    Type: AWS::SQS::Queue
+
+  QueueDynamoDB:
+    Type: AWS::SQS::Queue
+
+  SnsSubscriptionElasticSearch:
+    Type: AWS::SNS::Subscription
+    Properties:
+      FilterPolicy:
+        eventType:
+          - ADD_PRODUCT
+      Protocol: sqs
+      Endpoint: !GetAtt QueueElasticSearch.Arn
+      TopicArn: !Ref SnsTopicEventProcessing
+
+  SnsSubscriptionS3:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: sqs
+      Endpoint: !GetAtt QueueS3.Arn
+      TopicArn: !Ref SnsTopicEventProcessing
+
+  SnsSubscriptionDynamoDB:
+    Type: AWS::SNS::Subscription
+    Properties:
+      FilterPolicy:
+        eventType:
+          - ADD_CATEGORY
+      Protocol: sqs
+      Endpoint: !GetAtt QueueDynamoDB.Arn
+      TopicArn: !Ref SnsTopicEventProcessing
+
+  SnsToSqsPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "Allow SNS publish to SQS"
+            Effect: Allow
+            Principal:
+              Service: "sns.amazonaws.com"
+            Resource:
+              - !GetAtt QueueS3.Arn
+              - !GetAtt QueueDynamoDB.Arn
+              - !GetAtt QueueElasticSearch.Arn
+
+            Action: SQS:SendMessage
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref SnsTopicEventProcessing
+      Queues:
+        - Ref: QueueS3
+        - Ref: QueueDynamoDB
+        - Ref: QueueElasticSearch
 
 Outputs:
   WebEndpoint:

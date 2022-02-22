@@ -7,6 +7,14 @@ runtime = "nodejs14.x"
 architecture = "x86_64"
 manifest_hash = "8f16ea221e689d86ac619d2f4a184b99"
 packagetype = "Zip"
-functions = ["getAllItemsFunction", "getByIdFunction", "putItemFunction"]
+functions = ["createCategoryFunction", "getCategoryFunction", "createProductFunction", "getProductsFunction", "ProcessEventStreamFunction", "indexProductInOpenSearch"]
 
 [layer_build_definitions]
+[layer_build_definitions.12fb37f9-6b37-4133-99a6-580c9fe1091f]
+layer_name = "GlobalDependenciesLayer"
+codeuri = "/home/mbogusiak/upskill/upskill/layers"
+build_method = "nodejs14.x"
+compatible_runtimes = ["nodejs14.x"]
+architecture = "x86_64"
+manifest_hash = ""
+layer = "GlobalDependenciesLayer"

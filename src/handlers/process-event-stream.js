@@ -1,37 +1,33 @@
-// Create clients and set shared const values outside of the handler.
+var AWS = require('aws-sdk');
+const { marshall } = require("@aws-sdk/util-dynamodb");
+const snsTopic = process.env.SNS_TOPIC;
+const awsRegion = process.env.AWS_REGION;
+const { unmarshall } = require("@aws-sdk/util-dynamodb");
 
-// Get the DynamoDB table name from environment variables
-const tableName = process.env.SAMPLE_TABLE;
-
-// Create a DocumentClient that represents the query to add an item
-const dynamodb = require('aws-sdk/clients/dynamodb');
-const docClient = new dynamodb.DocumentClient();
-
-/**
- * A simple example includes a HTTP get method to get all items from a DynamoDB table.
- */
-exports.processStream = async (event) => {
-    if (event.httpMethod !== 'GET') {
-        throw new Error(`getAllItems only accept GET method, you tried: ${event.httpMethod}`);
-    }
-    // All log statements are written to CloudWatch
-    console.info('received:', event);
-
-    // get all items from the table (only first 1MB data, you can use `LastEvaluatedKey` to get the rest of data)
-    // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/DynamoDB/DocumentClient.html#scan-property
-    // https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Scan.html
+exports.processStreamHandler = (event) => {
+   event.Records.map(record =>{
+        if(record.eventName === 'INSERT'){
+             const product = unmarshall(record.dynamodb.NewImage);
+             return sendMessage(product).then((data,err)=>{
+                if (err) {
+                    console.log('Error sending a message', err);
+                }
+            });
+        }
+    });
+}
+function sendMessage(message){
+    const snsSubject = 'SNS Subject';
     var params = {
-        TableName : tableName
+      Message: JSON.stringify(message),
+      MessageAttributes: {
+        eventType: {
+          DataType: 'String',
+          StringValue: message.eventType
+        }},
+      Subject: snsSubject,
+      TopicArn: snsTopic
     };
-    const data = await docClient.scan(params).promise();
-    const items = data.Items;
-
-    const response = {
-        statusCode: 200,
-        body: JSON.stringify(items)
-    };
-
-    // All log statements are written to CloudWatch
-    console.info(`response from: ${event.path} statusCode: ${response.statusCode} body: ${response.body}`);
-    return response;
+    var sns = new AWS.SNS({ region: awsRegion });
+    return sns.publish(params).promise();
 }
